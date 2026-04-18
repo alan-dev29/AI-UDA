@@ -7,14 +7,22 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart'; // Importación necesaria
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // CARGA DE VARIABLES DE ENTORNO
+  try {
+    await dotenv.load(fileName: ".env");
+  } catch (e) {
+    debugPrint("Error al cargar .env: $e");
+  }
+
   final cameras = await availableCameras();
   runApp(MaterialApp(
     debugShowCheckedModeBanner: false,
     theme: ThemeData.dark().copyWith(
-      // Usamos el azul claro del logo como color de acento
       primaryColor: const Color(0xFF81D4FA), 
       scaffoldBackgroundColor: Colors.black,
     ),
@@ -41,7 +49,7 @@ class TakePictureScreenState extends State<TakePictureScreen> {
   bool _cargando = false;
   bool _estaGrabando = false;
   bool _mostrarBotonEmergencia = false;
-  List<Map<String, String>> _historialChat = [];
+  final List<Map<String, String>> _historialChat = [];
 
   @override
   void initState() {
@@ -57,7 +65,6 @@ class TakePictureScreenState extends State<TakePictureScreen> {
     await _flutterTts.setSpeechRate(0.5);
     
     _flutterTts.setCompletionHandler(() {
-      // Si no es una emergencia crítica, activamos el micro automáticamente
       if (!_mostrarBotonEmergencia) {
         Future.delayed(const Duration(milliseconds: 800), () => _activarMicrofono());
       }
@@ -90,7 +97,6 @@ class TakePictureScreenState extends State<TakePictureScreen> {
     }
   }
 
-  // BOTÓN MANUAL: Detiene el micro y envía lo que escuchó inmediatamente
   void _detenerYEnviar() {
     if (_estaGrabando) {
       String mensajeRecibido = _estadoVoz;
@@ -108,8 +114,14 @@ class TakePictureScreenState extends State<TakePictureScreen> {
   }
 
   Future<void> _llamarGroq(String? path) async {
-    const String apiKey = "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";
+    // USO SEGURO DE LA API KEY
+    final String apiKey = dotenv.env['GROQ_API_KEY'] ?? '';
     const String url = "https://api.groq.com/openai/v1/chat/completions";
+
+    if (apiKey.isEmpty) {
+      setState(() => _resultadoIA = "Error: API Key no configurada.");
+      return;
+    }
 
     setState(() {
       _cargando = true;
@@ -149,15 +161,15 @@ class TakePictureScreenState extends State<TakePictureScreen> {
         bool esCritico = textoRaw.toUpperCase().contains("CRÍTICO");
         
         setState(() {
-          // Limpieza de etiquetas para mostrar al usuario
           _resultadoIA = textoRaw.replaceFirst("CRÍTICO", "⚠️ EMERGENCIA CRÍTICA ⚠️")
-                                .replaceFirst("LEVE", "✅ SITUACIÓN ESTABLE");
+                                 .replaceFirst("LEVE", "✅ SITUACIÓN ESTABLE");
           _mostrarBotonEmergencia = esCritico;
           _estadoVoz = esCritico ? "Prioridad: Soporte Vital" : "Procesado.";
         });
         
-        // El TTS lee la respuesta limpia
         await _flutterTts.speak(_resultadoIA.replaceAll('*', '').replaceAll('⚠️', '').replaceAll('✅', ''));
+      } else {
+        setState(() => _resultadoIA = "Error de API: ${res.statusCode}");
       }
     } catch (e) {
       setState(() => _resultadoIA = "Error de conexión. Intenta de nuevo.");
@@ -173,8 +185,7 @@ class TakePictureScreenState extends State<TakePictureScreen> {
         title: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // LOGO EN EL APPBAR
-            Image.asset('assets/logo.png', height: 28), 
+            Image.asset('assets/logo.png', height: 28, errorBuilder: (ctx, obj, trace) => const Icon(Icons.medical_services)), 
             const SizedBox(width: 10),
             const Text('AI-UDA', style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1.2)),
           ],
@@ -195,17 +206,15 @@ class TakePictureScreenState extends State<TakePictureScreen> {
                     if (snap.connectionState == ConnectionState.done) {
                       return CameraPreview(_controller);
                     } else {
-                      // LOGO GRANDE MIENTRAS CARGA LA CÁMARA
                       return Container(
                         color: Colors.black,
                         child: Center(
-                          child: Image.asset('assets/logo.png', height: 120), 
+                          child: Image.asset('assets/logo.png', height: 120, errorBuilder: (ctx, obj, trace) => const CircularProgressIndicator()), 
                         ),
                       );
                     }
                   },
                 ),
-                // Superposición cuando está grabando audio
                 if (_estaGrabando)
                   Container(
                     color: Colors.black.withOpacity(0.6),
@@ -213,7 +222,6 @@ class TakePictureScreenState extends State<TakePictureScreen> {
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          // Icono de ondas de voz en azul claro (como el logo)
                           const Icon(Icons.graphic_eq, size: 100, color: Color(0xFF81D4FA)), 
                           const SizedBox(height: 10),
                           Text(_estadoVoz, textAlign: TextAlign.center, style: const TextStyle(fontSize: 18, color: Colors.white)),
@@ -221,7 +229,6 @@ class TakePictureScreenState extends State<TakePictureScreen> {
                       ),
                     ),
                   ),
-                // Botón de emergencia real (Solo en casos CRÍTICOS)
                 if (_mostrarBotonEmergencia)
                   Positioned(
                     bottom: 20,
@@ -243,11 +250,10 @@ class TakePictureScreenState extends State<TakePictureScreen> {
               ],
             ),
           ),
-          // Barra de estado de voz
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(12),
-            color: _estaGrabando ? Colors.red[900] : const Color(0xFF1A237E), // Azul oscuro para contraste
+            color: _estaGrabando ? Colors.red[900] : const Color(0xFF1A237E), 
             child: Row(
               children: [
                 Icon(_estaGrabando ? Icons.mic : Icons.mic_none, color: Colors.white70),
@@ -256,7 +262,6 @@ class TakePictureScreenState extends State<TakePictureScreen> {
               ],
             ),
           ),
-          // Panel de instrucciones de la IA
           Expanded(
             flex: 1,
             child: Container(
@@ -270,33 +275,30 @@ class TakePictureScreenState extends State<TakePictureScreen> {
           ),
         ],
       ),
-      // Botones de acción inferiores
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
       floatingActionButton: Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
-          // Botón de Cámara (Reinicia chat)
           FloatingActionButton.large(
             backgroundColor: Colors.redAccent,
             onPressed: _cargando ? null : () async {
               try {
                 await _initializeControllerFuture;
                 final img = await _controller.takePicture();
-                _historialChat.clear(); // Nueva emergencia, borramos historial
+                _historialChat.clear(); 
                 setState(() => _mostrarBotonEmergencia = false); 
                 await _llamarGroq(img.path);
               } catch (e) {
-                print(e);
+                debugPrint(e.toString());
               }
             },
             child: _cargando 
                 ? const CircularProgressIndicator(color: Colors.white) 
                 : const Icon(Icons.camera_alt, size: 40),
           ),
-          // Botón manual para enviar respuesta de voz (Solo visible al grabar)
           if (_estaGrabando)
             FloatingActionButton.extended(
-              backgroundColor: const Color(0xFF00C853), // Verde esmeralda
+              backgroundColor: const Color(0xFF00C853), 
               onPressed: _detenerYEnviar,
               icon: const Icon(Icons.check_circle, size: 28),
               label: const Text("LISTO", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
